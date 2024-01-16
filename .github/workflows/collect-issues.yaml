@@ -4,8 +4,14 @@ on:
       - labeled
       - edited
 
+permissions:
+  contents: write
+  issues: write
+
+
 jobs:
   issue_to_markdown:
+    name: Collect all issues
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
