@@ -1,0 +1,88 @@
+name: Collect Issues into Logseq pages
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 21 * * *' # once a day at 21:30 UTC
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  collect_all_issues:
+    name: collect all issues
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check that gh CLI is installed
+        run: gh --version
+
+      - name: Check out repo's default branch
+        uses: actions/checkout@v3
+
+      - name: Run script
+        timeout-minutes: 120
+        env:
+          # The default is 300 which works OK on a fast macbook pro
+          # but not so well in Actions.
+          LINKINATOR_CONCURRENCY: 100
+          LINKINATOR_LOG_FILE_PATH: linkinator.log
+        run: |
+          script/check-english-links.js > broken_links.md
+
+        uses: peter-evans/create-issue-from-file@b4f9ee0a9d4abbfc6986601d9b1a4f8f8e74c77e
+        with:
+          token: ${{ env.GITHUB_TOKEN }}
+          title: ${{ steps.check.outputs.title }}
+          content-filepath: ./broken_links.md
+          repository: ${{ env.REPORT_REPOSITORY }}
+          labels: ${{ env.REPORT_LABEL }}
+      - if: ${{ failure() }}
+        name: Close and/or comment on old issues
+        env:
+          NEW_REPORT_URL: 'https://github.com/${{ env.REPORT_REPOSITORY }}/issues/${{ steps.broken-link-report.outputs.issue-number }}'
+        run: |
+          gh alias set list-reports "issue list \
+                                       --repo ${{ env.REPORT_REPOSITORY }} \
+                                       --author ${{ env.REPORT_AUTHOR }} \
+                                       --label '${{ env.REPORT_LABEL }}'"
+
+          # Link to the previous report from the new report that triggered this
+          # workflow run.
+
+          previous_report_url=$(gh list-reports \
+                                  --state all \
+                                  --limit 2 \
+                                  --json url \
+                                  --jq '.[].url' \
+                                  | grep -v ${{ env.NEW_REPORT_URL }} | head -1)
+
+          gh issue comment ${{ env.NEW_REPORT_URL }} --body "⬅️ [Previous report]($previous_report_url)"
+
+          # If an old report is open and assigned to someone, link to the newer
+          # report without closing the old report.
+
+          for issue_url in $(gh list-reports \
+                                  --json assignees,url \
+                                  --jq '.[] | select (.assignees != []) | .url'); do
+            if [ "$issue_url" != "${{ env.NEW_REPORT_URL }}" ]; then
+              gh issue comment $issue_url --body "➡️ [Newer report](${{ env.NEW_REPORT_URL }})"
+            fi
+          done
+
+          # Link to the newer report from any older report that is still open,
+          # then close the older report and remove it from the first responder's
+          # project board.
+
+          for issue_url in $(gh list-reports \
+                                  --search 'no:assignee' \
+                                  --json url \
+                                  --jq '.[].url'); do
+            if [ "$issue_url" != "${{ env.NEW_REPORT_URL }}" ]; then
+              gh issue comment $issue_url --body "➡️ [Newer report](${{ env.NEW_REPORT_URL }})"
+              gh issue close $issue_url
+              gh issue edit $issue_url --remove-project "${{ env.FIRST_RESPONDER_PROJECT }}"
+            fi
+          done
