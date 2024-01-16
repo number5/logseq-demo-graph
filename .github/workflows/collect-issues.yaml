@@ -33,7 +33,7 @@ jobs:
           slug_key: 'slug'
 
     # By default, `publish` label is required for the workflow to work.
-    label: 'publish'
-      - uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: 'docs: update contents'
+        label: 'publish'
+          - uses: stefanzweifel/git-auto-commit-action@v4
+            with:
+            commit_message: 'docs: update contents'
